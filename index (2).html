@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>REP 2 ROUES</title>
+<link rel="manifest" href="manifest.json">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #f5f5f5; min-height: 100vh; }
+.header { background: #111; padding: 12px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 2px solid #e10600; }
+.header img { height: 40px; width: auto; }
+.header h1 { font-size: 16px; color: #fff; }
+.nav { display: flex; background: #111; border-bottom: 1px solid #222; overflow-x: auto; }
+.nav button { flex: 1; min-width: 70px; padding: 12px 8px; background: none; border: none; color: #888; font-size: 12px; white-space: nowrap; }
+.nav button.active { color: #e10600; border-bottom: 2px solid #e10600; font-weight: 600; }
+.container { padding: 12px; }
+.card { background: #1a1a1a; border-radius: 10px; padding: 14px; margin-bottom: 10px; border: 1px solid #222; }
+.card h3 { font-size: 14px; margin-bottom: 4px; }
+.card p { font-size: 12px; color: #888; }
+input, select, textarea { width: 100%; padding: 12px; margin: 5px 0; background: #111; border: 1px solid #333; border-radius: 8px; color: #fff; font-size: 15px; }
+input:focus, select:focus, textarea:focus { border-color: #e10600; outline: none; }
+button.btn { width: 100%; padding: 14px; background: #e10600; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; margin-top: 8px; }
+button.btn:active { background: #c10500; }
+button.btn-sec { background: #333; }
+button.btn-sm { padding: 8px 12px; font-size: 13px; width: auto; }
+.list-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #222; }
+.badge { background: #e10600; color: white; padding: 3px 8px; border-radius: 8px; font-size: 11px; }
+.badge-green { background: #166534; }
+.sync-bar { background: #1a1a1a; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #666; }
+.sync-bar.online { color: #4ade80; }
+.hidden { display: none; }
+.line-row { display: flex; gap: 6px; margin: 4px 0; }
+.line-row input { flex: 1; margin: 0; }
+.line-row input.small { flex: 0 0 60px; }
+.total-box { background: #111; padding: 12px; border-radius: 8px; margin-top: 10px; text-align: right; font-size: 18px; font-weight: bold; color: #e10600; }
+.actions { display: flex; gap: 8px; margin-top: 8px; }
+.actions button { flex: 1; }
+</style>
+</head>
+<body>
+<div class="header">
+  <img src="logo.png" alt="Logo" onerror="this.style.display='none'">
+  <h1>REP 2 ROUES</h1>
+</div>
+<div class="sync-bar" id="syncBar">
+  <span id="syncStatus">Hors ligne</span>
+  <button class="btn btn-sm btn-sec" onclick="exportData()">Exporter</button>
+</div>
+<div class="nav">
+  <button class="active" onclick="showTab('clients', this)">Clients</button>
+  <button onclick="showTab('devis', this)">Devis</button>
+  <button onclick="showTab('factures', this)">Factures</button>
+  <button onclick="showTab('nouveau', this)">+ Nouveau</button>
+</div>
+
+<div id="tab-clients" class="container">
+  <div id="clientsList"></div>
+</div>
+
+<div id="tab-devis" class="container hidden">
+  <div id="devisList"></div>
+</div>
+
+<div id="tab-factures" class="container hidden">
+  <div id="facturesList"></div>
+</div>
+
+<div id="tab-nouveau" class="container hidden">
+  <div class="card">
+    <h3>Nouveau client</h3>
+    <input id="cNom" placeholder="Nom *">
+    <input id="cTel" placeholder="Téléphone">
+    <input id="cEmail" placeholder="Email">
+    <input id="cAdresse" placeholder="Adresse">
+    <button class="btn" onclick="addClient()">Ajouter client</button>
+  </div>
+  <div class="card">
+    <h3>Nouveau devis / facture</h3>
+    <select id="docType"><option value="devis">Devis</option><option value="facture">Facture</option></select>
+    <select id="docClient"><option value="">-- Choisir client --</option></select>
+    <input id="docVehicule" placeholder="Véhicule (marque modèle)">
+    <input id="docImmat" placeholder="Immatriculation">
+    <input id="docKm" placeholder="Kilométrage">
+    <div id="lignesContainer"></div>
+    <button class="btn btn-sec" onclick="addLigne()">+ Ajouter une ligne</button>
+    <div class="total-box">Total : <span id="totalDisplay">0.00</span> €</div>
+    <button class="btn" onclick="createDoc()">Créer le document</button>
+  </div>
+</div>
+
+<script>
+const DB_KEY = 'rep2roues_data';
+let data = JSON.parse(localStorage.getItem(DB_KEY) || '{"clients":[],"docs":[]}');
+let lignes = [];
+
+function save() {
+  localStorage.setItem(DB_KEY, JSON.stringify(data));
+  updateSync();
+}
+
+function updateSync() {
+  const bar = document.getElementById('syncBar');
+  const status = document.getElementById('syncStatus');
+  if (navigator.onLine) {
+    bar.classList.add('online');
+    status.textContent = 'En ligne';
+  } else {
+    bar.classList.remove('online');
+    status.textContent = 'Hors ligne';
+  }
+}
+
+function showTab(tab, btn) {
+  document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.querySelectorAll('.container').forEach(c => c.classList.add('hidden'));
+  document.getElementById('tab-' + tab).classList.remove('hidden');
+  if (tab === 'clients') renderClients();
+  if (tab === 'devis') renderDocs('devis');
+  if (tab === 'factures') renderDocs('facture');
+  if (tab === 'nouveau') { loadClientsSelect(); renderLignes(); }
+}
+
+function renderClients() {
+  const el = document.getElementById('clientsList');
+  if (!data.clients.length) { el.innerHTML = '<p style="color:#555;text-align:center;padding:40px">Aucun client</p>'; return; }
+  el.innerHTML = data.clients.map((c, i) => `
+    <div class="card">
+      <h3>${c.nom}</h3>
+      <p>${c.tel || ''} ${c.email ? '• ' + c.email : ''}</p>
+      <p>${c.adresse || ''}</p>
+    </div>
+  `).join('');
+}
+
+function renderDocs(type) {
+  const el = document.getElementById(type === 'devis' ? 'devisList' : 'facturesList');
+  const docs = data.docs.filter(d => d.type === type);
+  if (!docs.length) { el.innerHTML = '<p style="color:#555;text-align:center;padding:40px">Aucun document</p>'; return; }
+  el.innerHTML = docs.map((d, i) => `
+    <div class="card">
+      <div class="list-item" style="border:none;padding:0">
+        <div>
+          <h3>${d.numero}</h3>
+          <p>${d.client}</p>
+          <p>${d.vehicule || ''} ${d.immat ? '• ' + d.immat : ''}</p>
+        </div>
+        <span class="badge">${(d.total || 0).toFixed(2)} €</span>
+      </div>
+      <div class="actions">
+        <button class="btn btn-sm btn-sec" onclick="viewDoc('${d.numero}')">Voir</button>
+        <button class="btn btn-sm" onclick="shareDoc('${d.numero}')">Partager</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function loadClientsSelect() {
+  const sel = document.getElementById('docClient');
+  sel.innerHTML = '<option value="">-- Choisir client --</option>' + 
+    data.clients.map((c, i) => `<option value="${i}">${c.nom}</option>`).join('');
+}
+
+function addLigne() {
+  lignes.push({ desc: '', qty: 1, prix: 0 });
+  renderLignes();
+}
+
+function renderLignes() {
+  const el = document.getElementById('lignesContainer');
+  el.innerHTML = lignes.map((l, i) => `
+    <div class="line-row">
+      <input placeholder="Désignation" value="${l.desc}" onchange="lignes[${i}].desc=this.value;calcTotal()">
+      <input class="small" type="number" placeholder="Qté" value="${l.qty}" onchange="lignes[${i}].qty=parseFloat(this.value)||1;calcTotal()">
+      <input class="small" type="number" placeholder="Prix" value="${l.prix}" onchange="lignes[${i}].prix=parseFloat(this.value)||0;calcTotal()">
+      <button class="btn btn-sm btn-sec" onclick="lignes.splice(${i},1);renderLignes()">✕</button>
+    </div>
+  `).join('');
+  calcTotal();
+}
+
+function calcTotal() {
+  const total = lignes.reduce((s, l) => s + (l.qty * l.prix), 0);
+  document.getElementById('totalDisplay').textContent = total.toFixed(2);
+  return total;
+}
+
+function addClient() {
+  const nom = document.getElementById('cNom').value.trim();
+  if (!nom) return alert('Nom requis');
+  data.clients.push({
+    nom,
+    tel: document.getElementById('cTel').value.trim(),
+    email: document.getElementById('cEmail').value.trim(),
+    adresse: document.getElementById('cAdresse').value.trim(),
+    date: new Date().toISOString()
+  });
+  save();
+  ['cNom','cTel','cEmail','cAdresse'].forEach(id => document.getElementById(id).value = '');
+  alert('Client ajouté');
+  showTab('clients', document.querySelector('.nav button'));
+}
+
+function createDoc() {
+  const type = document.getElementById('docType').value;
+  const clientIdx = document.getElementById('docClient').value;
+  if (clientIdx === '' || !data.clients[clientIdx]) return alert('Choisis un client');
+  if (!lignes.length) return alert('Ajoute au moins une ligne');
+  const total = calcTotal();
+  const year = new Date().getFullYear();
+  const prefix = type === 'devis' ? 'DE' : 'FA';
+  const num = data.docs.filter(d => d.type === type).length + 1;
+  data.docs.push({
+    type,
+    numero: `${prefix}-${year}-${String(num).padStart(3,'0')}`,
+    client: data.clients[clientIdx].nom,
+    vehicule: document.getElementById('docVehicule').value.trim(),
+    immat: document.getElementById('docImmat').value.trim(),
+    km: document.getElementById('docKm').value.trim(),
+    lignes: [...lignes],
+    total,
+    date: new Date().toISOString()
+  });
+  save();
+  lignes = [];
+  document.getElementById('docVehicule').value = '';
+  document.getElementById('docImmat').value = '';
+  document.getElementById('docKm').value = '';
+  alert('Document créé : ' + data.docs[data.docs.length-1].numero);
+  showTab(type === 'devis' ? 'devis' : 'factures', document.querySelectorAll('.nav button')[type === 'devis' ? 1 : 2]);
+}
+
+function viewDoc(numero) {
+  const doc = data.docs.find(d => d.numero === numero);
+  if (!doc) return;
+  let txt = `${doc.numero}\n${doc.client}\n${doc.vehicule || ''}\n\n`;
+  doc.lignes.forEach(l => txt += `${l.desc} x${l.qty} = ${(l.qty*l.prix).toFixed(2)}€\n`);
+  txt += `\nTotal : ${doc.total.toFixed(2)} €`;
+  alert(txt);
+}
+
+function shareDoc(numero) {
+  const doc = data.docs.find(d => d.numero === numero);
+  if (!doc) return;
+  let txt = `REP 2 ROUES\n${doc.type.toUpperCase()} ${doc.numero}\n\nClient : ${doc.client}\nVéhicule : ${doc.vehicule || '-'}\n\n`;
+  doc.lignes.forEach(l => txt += `• ${l.desc} (${l.qty} x ${l.prix}€) = ${(l.qty*l.prix).toFixed(2)}€\n`);
+  txt += `\nTotal : ${doc.total.toFixed(2)} €\n\n07 81 08 38 77`;
+  if (navigator.share) {
+    navigator.share({ title: doc.numero, text: txt });
+  } else {
+    navigator.clipboard.writeText(txt);
+    alert('Copié dans le presse-papier');
+  }
+}
+
+function exportData() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'rep2roues_sync.json';
+  a.click();
+}
+
+window.addEventListener('online', updateSync);
+window.addEventListener('offline', updateSync);
+updateSync();
+renderClients();
+</script>
+</body>
+</html>
